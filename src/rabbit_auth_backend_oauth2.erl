@@ -38,7 +38,7 @@
 
 -define(APP, rabbitmq_auth_backend_oauth2).
 -define(RESOURCE_SERVER_ID, resource_server_id).
--define(COMPLEX_CLAIM, additional_scopes_source).
+-define(COMPLEX_CLAIM, extra_permissions_source).
 
 description() ->
     [{name, <<"UAA">>},
@@ -149,102 +149,79 @@ check_token(Token) ->
     end.
 
 post_process_payload(Payload) when is_map(Payload) ->
-    ComplexClaimName = application:get_env(?APP, ?COMPLEX_CLAIM, <<>>),
-   
-    rabbit_log:debug("post_process_payload - ComplexClaimName '~s'", [ComplexClaimName]),
-
-    Payload0 = case maps:is_key(ComplexClaimName, Payload) of
+    Payload0 = case is_complex_claims(Payload) of
         true ->
-                rabbit_log:debug("post_process_payload - is_key '~s'", [true]),
-            post_process_complex_claims(Payload);
+            post_process_payload_complex_claims(Payload);
         false ->
-                rabbit_log:debug("post_process_payload - is_key '~s'", [false]),
             Payload
         end,
-    rabbit_log:debug("post_process_payload - Payload0 '~s'", [Payload0]),
-    
-    case maps:is_key(<<"authorization">>, Payload) of
+
+    Payload1 = case maps:is_key(<<"authorization">>, Payload) of
         true ->
             post_process_payload_keycloak(Payload);
         false ->
             Payload
-    end,
+        end,
 
-    case Payload0 of 
-        P when is_binary(P) -> 
-            maps:map(fun(K, V) ->
-                        case K of
-                            <<"scope">> when is_binary(V) ->
-                                binary:split(V, <<" ">>, [global]);
-                            _ -> V
-                        end
-                    end,
-                    Payload0);
-        P when is_list(P) -> 
-            maps:put(<<"scope">>, Payload0, Payload)
-            end.
-
-    % Payload1 = case maps:is_key(<<"authorization">>, Payload) of
-    %     true ->
-    %         post_process_payload_keycloak(Payload);
-    %     false ->
-    %         Payload
-    % end,
-    % maps:map(fun(K, V) ->
-    %             case K of
-    %                 <<"aud">> when is_binary(V) ->
-    %                     binary:split(V, <<" ">>, [global]);
-    %                 <<"scope">> when is_binary(V) ->
-    %                     binary:split(V, <<" ">>, [global]);
-    %                 _ -> V
-    %             end
-    %         end,
-    %         Payload1).
+    CombinedScopes = lists:append(maps:get(<<"scope">>, Payload0), maps:get(<<"scope">>, Payload1)),
+    CommonScopePayload = maps:put(<<"scope">>, CombinedScopes, Payload1),
+       
+    maps:map(fun(K, V) ->
+            case K of
+                <<"aud">> when is_binary(V) ->
+                    binary:split(V, <<" ">>, [global]);
+                <<"scope">> when is_binary(V) ->
+                    rabbit_log:debug("post_process_payload - V '~s'", [V]),
+                    binary:split(V, <<" ">>, [global]);
+                _ -> V
+            end
+        end,
+        CommonScopePayload).
     
-post_process_complex_claims(Payload) when is_map(Payload)->
+is_complex_claims(Payload) when is_map(Payload) ->
+        ComplexClaimName = application:get_env(?APP, ?COMPLEX_CLAIM, <<>>),
+        maps:is_key(ComplexClaimName, Payload).
+
+post_process_payload_complex_claims(Payload) ->
     ComplexClaimName = application:get_env(?APP, ?COMPLEX_CLAIM, <<>>),
     ComplexClaimContent = maps:get(ComplexClaimName, Payload),
+
+    ResourceServerEnv = application:get_env(?APP, ?RESOURCE_SERVER_ID, <<>>),
+    ResourceServerId = rabbit_data_coercion:to_binary(ResourceServerEnv),
+
+    RawClaimScopes = 
+        case ComplexClaimContent of
+            Content when is_list(Content) ->
+                    rabbit_log:debug("post_process_payload_complex_claims - Content - is_list"),
+                    Content;
+            Content when is_map(Content) ->
+                rabbit_log:debug("post_process_payload_complex_claims - Content - is_map"),
+                case maps:get(ResourceServerId, Content, empty) of
+                    empty ->
+                        [];
+                    Permissions when is_list(Permissions) ->
+                        rabbit_log:debug("post_process_payload_complex_claims - Permissions - is_list"),
+                        Permissions;
+                    Permission when is_binary(Permission) ->
+                        rabbit_log:debug("post_process_payload_complex_claims - Permissions - is_binary"),
+                        binary:split(Permission, <<" ">>, [global])
+                    end;
+            Content when is_binary(Content) ->
+                    rabbit_log:debug("post_process_payload_complex_claims - Content - is_binary"),
+                    binary:split(Content, <<" ">>, [global]);
+            _ ->
+                []
+            end,
+
+    DecoratedClaimScopes = [erlang:iolist_to_binary([ResourceServerId, <<".">>, K]) || K <- RawClaimScopes],
+    rabbit_log:debug("post_process_payload_complex_claims - DecoratedClaimScopes - '~s'", [DecoratedClaimScopes]),
     
-    rabbit_log:debug("post_process_complex_claims - ComplexClaimContent '~s'", [ComplexClaimContent]),
-
-    MergedClaimScopes = case ComplexClaimContent of
-        Content when is_atom(Content) ->
-                rabbit_log:debug("post_process_complex_claims - Content - is_atom"),
-                [Content];
-        Content when is_map(Content) ->
-            rabbit_log:debug("post_process_complex_claims - Content - is_map"),
-            ContentList = maps:to_list(Content),
-            rabbit_log:debug("post_process_complex_claims - ContentList - '~s'", [ContentList]),
-
-            ContentListFlatten = [
-                {Key, 
-                case Value of
-                    V when is_list(V) ->
-                        lists:map(
-                        fun(_El) ->
-                            R = <<Key/binary, <<".">>/binary, _El/binary>>,
-                            R    
-                        end,
-                        V);
-                    V when is_binary(V) ->
-                        <<Key/binary, <<".">>/binary, V/binary>>
-                    end}
-                || {Key, Value} <- ContentList],
-
-            Ceng = length(ContentListFlatten),
-            rabbit_log:debug("post_process_complex_claims - ContentListFlatten - '~s' Lenght '~s'", [ContentListFlatten, Ceng]),
-
-            Res = lists:flatten([Value || {_, Value} <- ContentListFlatten]),
-            ScopeString = rabbit_oauth2_scope:concat_scopes(Res, ","),
-            rabbit_log:debug("post_process_complex_claims - ContentListFlaRestten - '~s'", [ScopeString]),
-            Res;
-        Content when is_list(Content) ->
-            rabbit_log:debug("post_process_complex_claims - Content - is_list - TO DO: implement"),
-            []
-        end,
-        ScopeString2 = rabbit_oauth2_scope:concat_scopes(MergedClaimScopes, ","),
-    rabbit_log:debug("post_process_complex_claims - MergedClaimScopes '~s'", [ScopeString2]),
-    MergedClaimScopes.
+    case DecoratedClaimScopes of
+        [] ->
+            Payload;
+        _ -> 
+            maps:put(<<"scope">>, DecoratedClaimScopes, Payload)
+        end.
 
 %% keycloak token format: https://github.com/rabbitmq/rabbitmq-auth-backend-oauth2/issues/36
 post_process_payload_keycloak(#{<<"authorization">> := Authorization} = Payload) ->
