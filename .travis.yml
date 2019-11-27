@@ -3,13 +3,6 @@
 sudo: false
 language: generic
 
-notifications:
-  email:
-    recipients:
-      - alerts@rabbitmq.com
-    on_success: never
-    on_failure: always
-
 addons:
   apt:
     sources:
