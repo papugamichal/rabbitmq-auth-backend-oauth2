@@ -156,16 +156,13 @@ post_process_payload(Payload) when is_map(Payload) ->
             Payload
         end,
 
-    Payload1 = case maps:is_key(<<"authorization">>, Payload) of
+    Payload1 = case maps:is_key(<<"authorization">>, Payload0) of
         true ->
-            post_process_payload_keycloak(Payload);
+            post_process_payload_keycloak(Payload0);
         false ->
-            Payload
+            Payload0
         end,
-
-    CombinedScopes = lists:append(maps:get(<<"scope">>, Payload0), maps:get(<<"scope">>, Payload1)),
-    CommonScopePayload = maps:put(<<"scope">>, CombinedScopes, Payload1),
-       
+        
     maps:map(fun(K, V) ->
             case K of
                 <<"aud">> when is_binary(V) ->
@@ -176,7 +173,7 @@ post_process_payload(Payload) when is_map(Payload) ->
                 _ -> V
             end
         end,
-        CommonScopePayload).
+        Payload1).
     
 is_complex_claims(Payload) when is_map(Payload) ->
         ComplexClaimName = application:get_env(?APP, ?COMPLEX_CLAIM, <<>>),
