@@ -29,8 +29,8 @@
 
 all() ->
     [
-    %  {group, happy_path},
-    %  {group, unhappy_path}
+     {group, happy_path},
+     {group, unhappy_path}
     ].
 
 groups() ->
