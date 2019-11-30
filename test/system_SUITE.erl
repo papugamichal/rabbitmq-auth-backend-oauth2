@@ -39,6 +39,7 @@ groups() ->
                        test_successful_connection_with_a_full_permission_token_and_all_defaults,
                        test_successful_connection_with_a_full_permission_token_and_explicitly_configured_vhost,
                        test_successful_connection_with_simple_strings_for_aud_and_scope,
+                       test_successful_connection_with_list_complex_claim_token,
                        test_successful_connection_with_keycloak_token,
                        test_successful_token_refresh
                       ]},
