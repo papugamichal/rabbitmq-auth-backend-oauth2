@@ -58,6 +58,7 @@ groups() ->
 
 -define(UTIL_MOD, rabbit_auth_backend_oauth2_test_util).
 -define(RESOURCE_SERVER_ID, <<"rabbitmq">>).
+-define(EXTRA_PERMISSION_SCOURCE, <<"rabbit_resources">>).
 
 init_per_suite(Config) ->
     rabbit_ct_helpers:log_environment(),
@@ -210,6 +211,23 @@ test_successful_connection_with_simple_strings_for_aud_and_scope(Config) ->
     #'queue.declare_ok'{queue = _} =
         amqp_channel:call(Ch, #'queue.declare'{exclusive = true}),
     close_connection_and_channel(Conn, Ch).
+
+    test_successful_connection_with_list_complex_claim_token(Config) ->
+        ok = rabbit_ct_broker_helpers:rpc(Config, 0, application, set_env,
+            [rabbitmq_auth_backend_oauth2, extra_permissions_source, ?EXTRA_PERMISSION_SCOURCE]),
+        {_Algo, Token} = generate_valid_token_with_extra_fields(
+            Config,
+            #{<<"rabbitmq_resources">> => #{
+                <<"rabbitmq">> => [<<"configure:*/*">>, <<"read:*/*">>, <<"write:*/*">>],
+                <<"rabbitmq2">> => [<<"configure:*/*">>, <<"read:*/*">>, <<"write:*/*">>]}}
+        ),
+        Conn     = open_unmanaged_connection(Config, 0, <<"username">>, Token),
+        {ok, Ch} = amqp_connection:open_channel(Conn),
+        #'queue.declare_ok'{queue = _} =
+            amqp_channel:call(Ch, #'queue.declare'{exclusive = true}),
+        close_connection_and_channel(Conn, Ch).
+    
+    
 
 test_successful_connection_with_keycloak_token(Config) ->
     {_Algo, Token} = generate_valid_token_with_extra_fields(
