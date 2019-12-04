@@ -216,9 +216,11 @@ test_successful_connection_with_simple_strings_for_aud_and_scope(Config) ->
     close_connection_and_channel(Conn, Ch).
 
     test_successful_connection_with_list_complex_claim_token(Config) ->
+        application:set_env(rabbitmq_auth_backend_oauth2, extra_permissions_source, <<"rabbit_resources">>),
+        application:set_env(rabbitmq_auth_backend_oauth2, resource_server_id, <<"rabbitmq">>),
         {_Algo, Token} = generate_valid_token_with_extra_fields(
             Config,
-            #{<<"rabbitmq_resources">> => [<<"configure:*/*">>, <<"read:*/*">>, <<"write:*/*">>]}
+            #{<<"rabbit_resources">> => [<<"configure:*/*">>, <<"read:*/*">>, <<"write:*/*">>]}
         ),
         Conn     = open_unmanaged_connection(Config, 0, <<"username">>, Token),
         {ok, Ch} = amqp_connection:open_channel(Conn),
