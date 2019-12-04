@@ -189,35 +189,54 @@ post_process_payload_complex_claims(Payload) ->
     RawClaimScopes = 
         case ComplexClaimContent of
             Content when is_list(Content) ->
-                    rabbit_log:debug("post_process_payload_complex_claims - Content - is_list"),
-                    Content;
+                rabbit_log:debug("post_process_payload_complex_claims - Content - is_list"),
+                Content;
             Content when is_map(Content) ->
                 rabbit_log:debug("post_process_payload_complex_claims - Content - is_map"),
                 case maps:get(ResourceServerId, Content, empty) of
                     empty ->
                         [];
                     Permissions when is_list(Permissions) ->
-                        rabbit_log:debug("post_process_payload_complex_claims - Permissions - is_list"),
-                        Permissions;
+                        case Permissions of
+                            [] ->
+                                [];
+                            _ ->
+                                rabbit_log:debug("post_process_payload_complex_claims - Permissions - is_list"),
+                                DecoratedClaimScopes = [erlang:iolist_to_binary([ResourceServerId, <<".">>, K]) || K <- Permissions],
+                                rabbit_log:debug("post_process_payload_complex_claims - DecoratedClaimScopes - '~s'", [DecoratedClaimScopes]),
+                                DecoratedClaimScopes
+                            end;
                     Permission when is_binary(Permission) ->
-                        rabbit_log:debug("post_process_payload_complex_claims - Permissions - is_binary"),
-                        binary:split(Permission, <<" ">>, [global])
+                        case Permission of
+                            <<>> ->
+                                [];
+                            _ ->
+                                rabbit_log:debug("post_process_payload_complex_claims - Permissions - is_binary"),
+                                RawClaims = binary:split(Permission, <<" ">>, [global]),
+                                DecoratedClaimScopes = [erlang:iolist_to_binary([ResourceServerId, <<".">>, K]) || K <- RawClaims],
+                                rabbit_log:debug("post_process_payload_complex_claims - DecoratedClaimScopes - '~s'", [DecoratedClaimScopes]),
+                                DecoratedClaimScopes
+                            end;
+                    _ -> 
+                        []
                     end;
             Content when is_binary(Content) ->
-                    rabbit_log:debug("post_process_payload_complex_claims - Content - is_binary"),
-                    binary:split(Content, <<" ">>, [global]);
+                case Content of
+                    <<>> ->
+                        [];
+                    _ ->
+                        rabbit_log:debug("post_process_payload_complex_claims - Content - is_binary"),
+                        binary:split(Content, <<" ">>, [global])
+                    end;
             _ ->
                 []
             end,
 
-    DecoratedClaimScopes = [erlang:iolist_to_binary([ResourceServerId, <<".">>, K]) || K <- RawClaimScopes],
-    rabbit_log:debug("post_process_payload_complex_claims - DecoratedClaimScopes - '~s'", [DecoratedClaimScopes]),
-    
-    case DecoratedClaimScopes of
+    case RawClaimScopes of
         [] ->
             Payload;
         _ -> 
-            maps:put(<<"scope">>, DecoratedClaimScopes, Payload)
+            maps:put(<<"scope">>, RawClaimScopes, Payload)
         end.
 
 %% keycloak token format: https://github.com/rabbitmq/rabbitmq-auth-backend-oauth2/issues/36
